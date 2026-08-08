@@ -1,11 +1,11 @@
 import os
-import shutil
+import hashlib
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
 from core.scanner import scan
-from core.organizer import organize
+from core.organizer import organize, undo_organization
 
 
 class MainWindow(ctk.CTk):
@@ -37,6 +37,12 @@ class MainWindow(ctk.CTk):
 
         # Files returned by scanner
         self.scanned_files = []
+
+        # Duplicate groups detected during scan
+        self.duplicate_groups = []
+
+        # Number of duplicate files
+        self.duplicate_count = 0
 
         # Last successful organization result
         self.last_organization = None
@@ -199,7 +205,7 @@ class MainWindow(ctk.CTk):
             text="↩ Undo",
             width=120,
             state="disabled",
-            command=self.undo_organization
+            command=self.undo_files
         )
 
         self.undo_button.pack(
@@ -392,10 +398,391 @@ class MainWindow(ctk.CTk):
 
         elif card_name == "Duplicates":
 
-            messagebox.showinfo(
-                "Duplicates",
-                "Duplicate detection will be added next."
+            self.display_duplicates(
+                self.duplicate_groups
             )
+
+            if self.duplicate_count == 0:
+
+                self.status_label.configure(
+                    text="No duplicate files found"
+                )
+
+            else:
+
+                self.status_label.configure(
+                    text=(
+                        f"Showing {self.duplicate_count} "
+                        f"duplicate files"
+                    )
+                )
+
+    # ==========================================
+    # Duplicate Detection
+    # ==========================================
+
+    def detect_duplicates(self, show_results=False):
+
+        self.duplicate_groups = []
+        self.duplicate_count = 0
+
+        if not self.scanned_files:
+
+            self.card_values["Duplicates"].configure(
+                text="0"
+            )
+
+            if show_results:
+
+                self.show_empty_message(
+                    "No files available for duplicate detection"
+                )
+
+            return
+
+        try:
+
+            # ==========================================
+            # Step 1 — Group Files By Size
+            # ==========================================
+
+            size_groups = {}
+
+            for file_data in self.scanned_files:
+
+                file_path = file_data.get("path")
+
+                if not file_path:
+                    continue
+
+                try:
+
+                    if not os.path.isfile(file_path):
+                        continue
+
+                    size = file_data.get(
+                        "size",
+                        0
+                    )
+
+                    size_groups.setdefault(
+                        size,
+                        []
+                    ).append(file_data)
+
+                except OSError:
+
+                    continue
+
+            # ==========================================
+            # Step 2 — Hash Files With Same Size
+            # ==========================================
+
+            duplicate_groups = []
+
+            for size, files in size_groups.items():
+
+                if len(files) < 2:
+                    continue
+
+                hash_groups = {}
+
+                for file_data in files:
+
+                    file_path = file_data.get("path")
+
+                    if not file_path:
+                        continue
+
+                    try:
+
+                        file_hash = self.calculate_file_hash(
+                            file_path
+                        )
+
+                        hash_groups.setdefault(
+                            file_hash,
+                            []
+                        ).append(file_data)
+
+                    except (
+                        OSError,
+                        PermissionError
+                    ):
+
+                        continue
+
+                # ==========================================
+                # Store Actual Duplicate Groups
+                # ==========================================
+
+                for file_hash, matching_files in hash_groups.items():
+
+                    if len(matching_files) > 1:
+
+                        duplicate_groups.append({
+                            "hash": file_hash,
+                            "size": size,
+                            "files": matching_files
+                        })
+
+            # ==========================================
+            # Calculate Duplicate Count
+            # ==========================================
+
+            duplicate_count = 0
+
+            for group in duplicate_groups:
+
+                duplicate_count += (
+                    len(group["files"]) - 1
+                )
+
+            # ==========================================
+            # Save Results
+            # ==========================================
+
+            self.duplicate_groups = duplicate_groups
+            self.duplicate_count = duplicate_count
+
+            # ==========================================
+            # Update Dashboard Immediately
+            # ==========================================
+
+            self.card_values["Duplicates"].configure(
+                text=str(duplicate_count)
+            )
+
+            # ==========================================
+            # Optionally Display Results
+            # ==========================================
+
+            if show_results:
+
+                self.display_duplicates(
+                    duplicate_groups
+                )
+
+        except Exception as error:
+
+            self.card_values["Duplicates"].configure(
+                text="0"
+            )
+
+            self.status_label.configure(
+                text="Duplicate detection failed"
+            )
+
+            messagebox.showerror(
+                "Duplicate Detection Error",
+                str(error)
+            )
+
+    # ==========================================
+    # Calculate SHA-256 File Hash
+    # ==========================================
+
+    def calculate_file_hash(self, file_path):
+
+        sha256 = hashlib.sha256()
+
+        with open(
+            file_path,
+            "rb"
+        ) as file:
+
+            while True:
+
+                chunk = file.read(
+                    1024 * 1024
+                )
+
+                if not chunk:
+                    break
+
+                sha256.update(chunk)
+
+        return sha256.hexdigest()
+
+    # ==========================================
+    # Display Duplicate Groups
+    # ==========================================
+
+    def display_duplicates(self, duplicate_groups):
+
+        self.clear_file_list()
+
+        # ==========================================
+        # No Duplicates
+        # ==========================================
+
+        if not duplicate_groups:
+
+            ctk.CTkLabel(
+                self.file_list,
+                text="✓ No duplicate files found",
+                text_color="gray",
+                font=("Segoe UI", 14)
+            ).pack(
+                pady=40
+            )
+
+            return
+
+        # ==========================================
+        # Summary
+        # ==========================================
+
+        total_duplicate_files = sum(
+            len(group["files"]) - 1
+            for group in duplicate_groups
+        )
+
+        summary = ctk.CTkLabel(
+            self.file_list,
+            text=(
+                f"Found {len(duplicate_groups)} duplicate groups • "
+                f"{total_duplicate_files} duplicate files"
+            ),
+            font=("Segoe UI", 14, "bold"),
+            anchor="w"
+        )
+
+        summary.pack(
+            fill="x",
+            padx=15,
+            pady=(5, 15)
+        )
+
+        # ==========================================
+        # Duplicate Groups
+        # ==========================================
+
+        for index, group in enumerate(
+            duplicate_groups,
+            start=1
+        ):
+
+            group_frame = ctk.CTkFrame(
+                self.file_list
+            )
+
+            group_frame.pack(
+                fill="x",
+                pady=5,
+                padx=5
+            )
+
+            # ==========================================
+            # Group Header
+            # ==========================================
+
+            group_header = ctk.CTkFrame(
+                group_frame
+            )
+
+            group_header.pack(
+                fill="x"
+            )
+
+            group_size = self.format_file_size(
+                group["size"]
+            )
+
+            ctk.CTkLabel(
+                group_header,
+                text=(
+                    f"Duplicate Group {index}  •  "
+                    f"{len(group['files'])} identical files  •  "
+                    f"{group_size} each"
+                ),
+                font=("Segoe UI", 13, "bold"),
+                anchor="w"
+            ).pack(
+                side="left",
+                fill="x",
+                expand=True,
+                padx=15,
+                pady=10
+            )
+
+            # ==========================================
+            # Files
+            # ==========================================
+
+            for file_index, file_data in enumerate(
+                group["files"]
+            ):
+
+                file_row = ctk.CTkFrame(
+                    group_frame
+                )
+
+                file_row.pack(
+                    fill="x",
+                    padx=10,
+                    pady=2
+                )
+
+                # ==========================================
+                # Original / Duplicate Label
+                # ==========================================
+
+                if file_index == 0:
+
+                    label = "ORIGINAL"
+
+                else:
+
+                    label = "DUPLICATE"
+
+                ctk.CTkLabel(
+                    file_row,
+                    text=label,
+                    width=100,
+                    font=("Segoe UI", 11, "bold"),
+                    anchor="w"
+                ).pack(
+                    side="left",
+                    padx=10
+                )
+
+                # ==========================================
+                # File Name
+                # ==========================================
+
+                ctk.CTkLabel(
+                    file_row,
+                    text=file_data.get(
+                        "name",
+                        "Unknown"
+                    ),
+                    anchor="w"
+                ).pack(
+                    side="left",
+                    fill="x",
+                    expand=True,
+                    padx=10
+                )
+
+                # ==========================================
+                # File Size
+                # ==========================================
+
+                ctk.CTkLabel(
+                    file_row,
+                    text=self.format_file_size(
+                        file_data.get(
+                            "size",
+                            0
+                        )
+                    ),
+                    width=100,
+                    anchor="e"
+                ).pack(
+                    side="left",
+                    padx=10
+                )
 
     # ==========================================
     # Display Categories
@@ -411,12 +798,12 @@ class MainWindow(ctk.CTk):
 
         header = ctk.CTkFrame(
             self.file_list,
-            height=45
+            height=50
         )
 
         header.pack(
             fill="x",
-            pady=(0, 5)
+            pady=(0, 8)
         )
 
         ctk.CTkLabel(
@@ -435,7 +822,8 @@ class MainWindow(ctk.CTk):
             header,
             text="Files",
             font=("Segoe UI", 13, "bold"),
-            width=120
+            width=120,
+            anchor="center"
         ).pack(
             side="left",
             padx=15
@@ -485,19 +873,23 @@ class MainWindow(ctk.CTk):
 
             row = ctk.CTkFrame(
                 self.file_list,
-                height=50,
+                height=55,
                 cursor="hand2"
             )
 
             row.pack(
                 fill="x",
-                pady=2
+                pady=3
             )
+
+            # ==========================================
+            # Category Name
+            # ==========================================
 
             category_label = ctk.CTkLabel(
                 row,
                 text=f"📁  {category}",
-                font=("Segoe UI", 14),
+                font=("Segoe UI", 14, "bold"),
                 anchor="w",
                 cursor="hand2"
             )
@@ -508,6 +900,10 @@ class MainWindow(ctk.CTk):
                 expand=True,
                 padx=15
             )
+
+            # ==========================================
+            # File Count
+            # ==========================================
 
             count_label = ctk.CTkLabel(
                 row,
@@ -523,7 +919,7 @@ class MainWindow(ctk.CTk):
             )
 
             # ==========================================
-            # Click Category
+            # Make Entire Row Clickable
             # ==========================================
 
             row.bind(
@@ -543,6 +939,18 @@ class MainWindow(ctk.CTk):
                 lambda event, name=category:
                 self.show_category_files(name)
             )
+
+        # ==========================================
+        # Status
+        # ==========================================
+
+        self.status_label.configure(
+            text=(
+                f"Showing {len(category_counts)} "
+                f"categories • "
+                f"{len(self.scanned_files)} files"
+            )
+        )
 
     # ==========================================
     # File Table
@@ -626,7 +1034,10 @@ class MainWindow(ctk.CTk):
     # Empty Message
     # ==========================================
 
-    def show_empty_message(self, text="No files scanned yet"):
+    def show_empty_message(
+        self,
+        text="No files scanned yet"
+    ):
 
         self.clear_file_list()
 
@@ -646,6 +1057,7 @@ class MainWindow(ctk.CTk):
     def clear_file_list(self):
 
         for widget in self.file_list.winfo_children():
+
             widget.destroy()
 
     # ==========================================
@@ -682,6 +1094,8 @@ class MainWindow(ctk.CTk):
         self.selected_folder = folder
 
         self.scanned_files = []
+        self.duplicate_groups = []
+        self.duplicate_count = 0
         self.last_organization = None
 
         self.folder_label.configure(
@@ -755,6 +1169,10 @@ class MainWindow(ctk.CTk):
 
             self.update_idletasks()
 
+            # ==========================================
+            # Scan
+            # ==========================================
+
             results = scan(
                 self.selected_folder
             )
@@ -765,11 +1183,22 @@ class MainWindow(ctk.CTk):
 
             self.scanned_files = results["files"]
 
-            # A new scan invalidates the old undo state
+            # A new scan invalidates old undo history.
             self.last_organization = None
 
             # ==========================================
-            # Enable Organize
+            # Reset Duplicate Data
+            # ==========================================
+
+            self.duplicate_groups = []
+            self.duplicate_count = 0
+
+            self.card_values["Duplicates"].configure(
+                text="0"
+            )
+
+            # ==========================================
+            # Enable / Disable Organize
             # ==========================================
 
             if self.scanned_files:
@@ -814,7 +1243,24 @@ class MainWindow(ctk.CTk):
             )
 
             # ==========================================
-            # Display Files
+            # AUTOMATIC DUPLICATE DETECTION
+            # ==========================================
+
+            self.status_label.configure(
+                text="Checking for duplicate files..."
+            )
+
+            self.update_idletasks()
+
+            # Detect duplicates automatically,
+            # but DO NOT display duplicate results.
+            self.detect_duplicates(
+                show_results=False
+            )
+
+            # ==========================================
+            # IMPORTANT:
+            # Show Total Files After Scan
             # ==========================================
 
             self.display_files(
@@ -822,15 +1268,30 @@ class MainWindow(ctk.CTk):
             )
 
             # ==========================================
-            # Status
+            # Final Status
             # ==========================================
 
-            self.status_label.configure(
-                text=(
-                    f"Scan complete • "
-                    f"{results['total_files']} files found"
+            if self.duplicate_count > 0:
+
+                self.status_label.configure(
+                    text=(
+                        f"Scan complete • "
+                        f"{results['total_files']} files found • "
+                        f"{self.duplicate_count} duplicates • "
+                        f"Showing all files"
+                    )
                 )
-            )
+
+            else:
+
+                self.status_label.configure(
+                    text=(
+                        f"Scan complete • "
+                        f"{results['total_files']} files found • "
+                        f"No duplicates • "
+                        f"Showing all files"
+                    )
+                )
 
         except Exception as error:
 
@@ -939,25 +1400,31 @@ class MainWindow(ctk.CTk):
                 )
 
             # ==========================================
-            # Update UI
+            # Disable Organize
             # ==========================================
 
             self.organize_button.configure(
                 state="disabled"
             )
 
-            self.status_label.configure(
-                text=(
-                    f"Organization complete • "
-                    f"{moved_count} files moved"
-                )
-            )
+            # ==========================================
+            # Refresh
+            # ==========================================
+
+            self.refresh_after_organization()
 
             # ==========================================
-            # Show Result
+            # Result Feedback
             # ==========================================
 
             if error_count == 0:
+
+                self.status_label.configure(
+                    text=(
+                        f"Organization complete • "
+                        f"{moved_count} files moved"
+                    )
+                )
 
                 messagebox.showinfo(
                     "Organization Complete",
@@ -971,6 +1438,14 @@ class MainWindow(ctk.CTk):
 
             else:
 
+                self.status_label.configure(
+                    text=(
+                        f"Organization completed with errors • "
+                        f"{moved_count} moved, "
+                        f"{error_count} errors"
+                    )
+                )
+
                 messagebox.showwarning(
                     "Organization Completed With Errors",
                     (
@@ -981,12 +1456,6 @@ class MainWindow(ctk.CTk):
                         "that were successfully moved."
                     )
                 )
-
-            # ==========================================
-            # Rescan Folder
-            # ==========================================
-
-            self.refresh_after_organization()
 
         except Exception as error:
 
@@ -1003,7 +1472,7 @@ class MainWindow(ctk.CTk):
     # Undo Organization
     # ==========================================
 
-    def undo_organization(self):
+    def undo_files(self):
 
         if not self.last_organization:
 
@@ -1047,106 +1516,87 @@ class MainWindow(ctk.CTk):
 
             self.update_idletasks()
 
-            restored_count = 0
-            errors = []
-
             # ==========================================
-            # Restore Each File
+            # Undo
             # ==========================================
 
-            for file_data in moved_files:
+            result = undo_organization(
+                moved_files
+            )
 
-                source = file_data.get(
-                    "source"
-                )
+            restored = result.get(
+                "restored",
+                []
+            )
 
-                destination = file_data.get(
-                    "destination"
-                )
+            errors = result.get(
+                "errors",
+                []
+            )
 
-                if not source or not destination:
-                    errors.append(
-                        "Missing source or destination path."
-                    )
-                    continue
+            restored_count = len(
+                restored
+            )
 
-                # File no longer exists at destination
-                if not os.path.isfile(destination):
-
-                    errors.append(
-                        f"File not found: {destination}"
-                    )
-
-                    continue
-
-                try:
-
-                    # ==========================================
-                    # Make Sure Original Directory Exists
-                    # ==========================================
-
-                    original_directory = os.path.dirname(
-                        source
-                    )
-
-                    os.makedirs(
-                        original_directory,
-                        exist_ok=True
-                    )
-
-                    # ==========================================
-                    # Avoid Overwriting Another File
-                    # ==========================================
-
-                    if os.path.exists(source):
-
-                        errors.append(
-                            (
-                                f"Original location already "
-                                f"contains a file: {source}"
-                            )
-                        )
-
-                        continue
-
-                    # ==========================================
-                    # Move Back
-                    # ==========================================
-
-                    shutil.move(
-                        destination,
-                        source
-                    )
-
-                    restored_count += 1
-
-                except Exception as error:
-
-                    errors.append(
-                        f"{os.path.basename(destination)}: {error}"
-                    )
-
-            # ==========================================
-            # Clear Undo History
-            # ==========================================
-
-            self.last_organization = None
-
-            self.undo_button.configure(
-                state="disabled"
+            error_count = len(
+                errors
             )
 
             # ==========================================
-            # Rescan
+            # Update Undo History
+            # ==========================================
+
+            if error_count == 0:
+
+                self.last_organization = None
+
+                self.undo_button.configure(
+                    state="disabled"
+                )
+
+            else:
+
+                restored_sources = {
+                    item["source"]
+                    for item in restored
+                }
+
+                remaining = [
+                    item
+                    for item in moved_files
+                    if item.get("source")
+                    not in restored_sources
+                ]
+
+                if remaining:
+
+                    self.last_organization = {
+                        "moved": remaining
+                    }
+
+                    self.undo_button.configure(
+                        state="normal"
+                    )
+
+                else:
+
+                    self.last_organization = None
+
+                    self.undo_button.configure(
+                        state="disabled"
+                    )
+
+            # ==========================================
+            # Refresh
             # ==========================================
 
             self.refresh_after_organization()
 
             # ==========================================
-            # Result
+            # Result Feedback
             # ==========================================
 
-            if not errors:
+            if error_count == 0:
 
                 self.status_label.configure(
                     text=(
@@ -1167,18 +1617,24 @@ class MainWindow(ctk.CTk):
 
                 self.status_label.configure(
                     text=(
-                        f"Undo completed • "
+                        f"Undo completed with errors • "
                         f"{restored_count} restored, "
-                        f"{len(errors)} errors"
+                        f"{error_count} errors"
                     )
+                )
+
+                error_details = "\n".join(
+                    f"• {error['name']}: {error['error']}"
+                    for error in errors
                 )
 
                 messagebox.showwarning(
                     "Undo Completed With Errors",
                     (
                         f"{restored_count} files restored.\n"
-                        f"{len(errors)} files could not "
-                        "be restored."
+                        f"{error_count} files could not "
+                        f"be restored.\n\n"
+                        f"{error_details}"
                     )
                 )
 
@@ -1235,12 +1691,36 @@ class MainWindow(ctk.CTk):
             )
 
             # ==========================================
-            # Display Updated Files
+            # Detect Duplicates Again
+            # ==========================================
+
+            self.detect_duplicates(
+                show_results=False
+            )
+
+            # ==========================================
+            # Show Total Files After Refresh
             # ==========================================
 
             self.display_files(
                 self.scanned_files
             )
+
+            # ==========================================
+            # Organize Button
+            # ==========================================
+
+            if self.scanned_files:
+
+                self.organize_button.configure(
+                    state="normal"
+                )
+
+            else:
+
+                self.organize_button.configure(
+                    state="disabled"
+                )
 
         except Exception as error:
 
