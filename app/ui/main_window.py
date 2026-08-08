@@ -4,8 +4,8 @@ import hashlib
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
-from core.scanner import scan
-from core.organizer import organize, undo_organization
+from app.core.scanner import scan
+from app.core.organizer import organize, undo_organization
 
 
 class MainWindow(ctk.CTk):
