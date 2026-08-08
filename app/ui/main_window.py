@@ -1,3 +1,6 @@
+import os
+import shutil
+
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
@@ -26,16 +29,28 @@ class MainWindow(ctk.CTk):
         self.geometry("1200x720")
         self.minsize(900, 600)
 
-        # Selected folder
+        # ==========================================
+        # Application State
+        # ==========================================
+
         self.selected_folder = ""
 
-        # Store scanned files
+        # Files returned by scanner
         self.scanned_files = []
 
-        # Center window
+        # Last successful organization result
+        self.last_organization = None
+
+        # ==========================================
+        # Center Window
+        # ==========================================
+
         self.center_window()
 
-        # Create interface
+        # ==========================================
+        # Create Interface
+        # ==========================================
+
         self.create_layout()
 
     # ==========================================
@@ -122,7 +137,10 @@ class MainWindow(ctk.CTk):
 
     def create_toolbar(self):
 
+        # ==========================================
         # Select Folder
+        # ==========================================
+
         self.select_button = ctk.CTkButton(
             self.toolbar,
             text="📁 Select Folder",
@@ -136,7 +154,10 @@ class MainWindow(ctk.CTk):
             pady=15
         )
 
+        # ==========================================
         # Scan
+        # ==========================================
+
         self.scan_button = ctk.CTkButton(
             self.toolbar,
             text="🔍 Scan",
@@ -151,7 +172,10 @@ class MainWindow(ctk.CTk):
             pady=15
         )
 
+        # ==========================================
         # Organize
+        # ==========================================
+
         self.organize_button = ctk.CTkButton(
             self.toolbar,
             text="📂 Organize",
@@ -166,12 +190,16 @@ class MainWindow(ctk.CTk):
             pady=15
         )
 
+        # ==========================================
         # Undo
+        # ==========================================
+
         self.undo_button = ctk.CTkButton(
             self.toolbar,
             text="↩ Undo",
             width=120,
-            state="disabled"
+            state="disabled",
+            command=self.undo_organization
         )
 
         self.undo_button.pack(
@@ -252,7 +280,6 @@ class MainWindow(ctk.CTk):
                 padx=8
             )
 
-            # Store card
             self.card_frames[title] = card
 
             # ==========================================
@@ -301,7 +328,7 @@ class MainWindow(ctk.CTk):
             self.card_values[title] = value_label
 
             # ==========================================
-            # Make Entire Card Clickable
+            # Make Card Clickable
             # ==========================================
 
             card.bind(
@@ -334,10 +361,6 @@ class MainWindow(ctk.CTk):
 
     def card_clicked(self, card_name):
 
-        # ==========================================
-        # Total Files
-        # ==========================================
-
         if card_name == "Total Files":
 
             self.display_files(
@@ -351,10 +374,6 @@ class MainWindow(ctk.CTk):
                 )
             )
 
-        # ==========================================
-        # Categories
-        # ==========================================
-
         elif card_name == "Categories":
 
             self.display_categories()
@@ -363,10 +382,6 @@ class MainWindow(ctk.CTk):
                 text="Showing file categories"
             )
 
-        # ==========================================
-        # Total Size
-        # ==========================================
-
         elif card_name == "Total Size":
 
             self.display_size_summary()
@@ -374,10 +389,6 @@ class MainWindow(ctk.CTk):
             self.status_label.configure(
                 text="Showing size summary"
             )
-
-        # ==========================================
-        # Duplicates
-        # ==========================================
 
         elif card_name == "Duplicates":
 
@@ -392,12 +403,10 @@ class MainWindow(ctk.CTk):
 
     def display_categories(self):
 
-        # Clear existing table
-        for widget in self.file_list.winfo_children():
-            widget.destroy()
+        self.clear_file_list()
 
         # ==========================================
-        # Category Header
+        # Header
         # ==========================================
 
         header = ctk.CTkFrame(
@@ -433,7 +442,7 @@ class MainWindow(ctk.CTk):
         )
 
         # ==========================================
-        # Get Category Counts
+        # Category Counts
         # ==========================================
 
         category_counts = {}
@@ -485,7 +494,6 @@ class MainWindow(ctk.CTk):
                 pady=2
             )
 
-            # Category name
             category_label = ctk.CTkLabel(
                 row,
                 text=f"📁  {category}",
@@ -501,7 +509,6 @@ class MainWindow(ctk.CTk):
                 padx=15
             )
 
-            # Count
             count_label = ctk.CTkLabel(
                 row,
                 text=str(count),
@@ -543,10 +550,6 @@ class MainWindow(ctk.CTk):
 
     def create_file_table(self):
 
-        # ==========================================
-        # Table Container
-        # ==========================================
-
         self.table_frame = ctk.CTkFrame(
             self.content
         )
@@ -569,7 +572,6 @@ class MainWindow(ctk.CTk):
             fill="x"
         )
 
-        # Header: File Name
         ctk.CTkLabel(
             self.table_header,
             text="File Name",
@@ -582,7 +584,6 @@ class MainWindow(ctk.CTk):
             padx=(15, 5)
         )
 
-        # Header: Type
         ctk.CTkLabel(
             self.table_header,
             text="Type",
@@ -593,7 +594,6 @@ class MainWindow(ctk.CTk):
             padx=5
         )
 
-        # Header: Size
         ctk.CTkLabel(
             self.table_header,
             text="Size",
@@ -620,17 +620,33 @@ class MainWindow(ctk.CTk):
             pady=5
         )
 
-        # Empty message
-        self.empty_label = ctk.CTkLabel(
+        self.show_empty_message()
+
+    # ==========================================
+    # Empty Message
+    # ==========================================
+
+    def show_empty_message(self, text="No files scanned yet"):
+
+        self.clear_file_list()
+
+        ctk.CTkLabel(
             self.file_list,
-            text="No files scanned yet",
+            text=text,
             text_color="gray",
             font=("Segoe UI", 14)
-        )
-
-        self.empty_label.pack(
+        ).pack(
             pady=40
         )
+
+    # ==========================================
+    # Clear File List
+    # ==========================================
+
+    def clear_file_list(self):
+
+        for widget in self.file_list.winfo_children():
+            widget.destroy()
 
     # ==========================================
     # Status Bar
@@ -665,6 +681,9 @@ class MainWindow(ctk.CTk):
 
         self.selected_folder = folder
 
+        self.scanned_files = []
+        self.last_organization = None
+
         self.folder_label.configure(
             text=f"Selected Folder: {folder}"
         )
@@ -673,8 +692,44 @@ class MainWindow(ctk.CTk):
             text="Folder selected successfully"
         )
 
+        # ==========================================
+        # Reset Dashboard
+        # ==========================================
+
+        self.card_values["Total Files"].configure(
+            text="0"
+        )
+
+        self.card_values["Categories"].configure(
+            text="0"
+        )
+
+        self.card_values["Total Size"].configure(
+            text="0 MB"
+        )
+
+        self.card_values["Duplicates"].configure(
+            text="0"
+        )
+
+        # ==========================================
+        # Reset Buttons
+        # ==========================================
+
         self.scan_button.configure(
             state="normal"
+        )
+
+        self.organize_button.configure(
+            state="disabled"
+        )
+
+        self.undo_button.configure(
+            state="disabled"
+        )
+
+        self.show_empty_message(
+            "No files scanned yet"
         )
 
     # ==========================================
@@ -704,12 +759,33 @@ class MainWindow(ctk.CTk):
                 self.selected_folder
             )
 
-            # Store results
+            # ==========================================
+            # Store Results
+            # ==========================================
+
             self.scanned_files = results["files"]
 
+            # A new scan invalidates the old undo state
+            self.last_organization = None
+
+            # ==========================================
             # Enable Organize
-            self.organize_button.configure(
-              state="normal"
+            # ==========================================
+
+            if self.scanned_files:
+
+                self.organize_button.configure(
+                    state="normal"
+                )
+
+            else:
+
+                self.organize_button.configure(
+                    state="disabled"
+                )
+
+            self.undo_button.configure(
+                state="disabled"
             )
 
             # ==========================================
@@ -738,7 +814,7 @@ class MainWindow(ctk.CTk):
             )
 
             # ==========================================
-            # Update File Table
+            # Display Files
             # ==========================================
 
             self.display_files(
@@ -767,29 +843,38 @@ class MainWindow(ctk.CTk):
                 str(error)
             )
 
-            # ==========================================
-# Organize Files
-# ==========================================
+    # ==========================================
+    # Organize Files
+    # ==========================================
 
     def organize_files(self):
 
         if not self.selected_folder:
+
             messagebox.showwarning(
                 "No Folder Selected",
                 "Please select a folder first."
             )
+
             return
 
         if not self.scanned_files:
+
             messagebox.showwarning(
                 "No Files",
                 "Please scan the folder first."
             )
+
             return
 
         confirm = messagebox.askyesno(
             "Organize Files",
-            "Are you sure you want to organize these files?"
+            (
+                "Are you sure you want to organize "
+                "these files?\n\n"
+                "Files will be moved into category "
+                "folders."
+            )
         )
 
         if not confirm:
@@ -803,20 +888,64 @@ class MainWindow(ctk.CTk):
 
             self.update_idletasks()
 
+            # ==========================================
+            # Organize
+            # ==========================================
+
             results = organize(
                 self.selected_folder,
                 self.scanned_files
             )
 
+            moved_files = results.get(
+                "moved",
+                []
+            )
+
+            errors = results.get(
+                "errors",
+                []
+            )
+
             moved_count = len(
-                results["moved"]
+                moved_files
             )
 
             error_count = len(
-                results["errors"]
+                errors
             )
 
-            # Update status
+            # ==========================================
+            # Save Undo History
+            # ==========================================
+
+            if moved_files:
+
+                self.last_organization = {
+                    "moved": moved_files,
+                    "errors": errors
+                }
+
+                self.undo_button.configure(
+                    state="normal"
+                )
+
+            else:
+
+                self.last_organization = None
+
+                self.undo_button.configure(
+                    state="disabled"
+                )
+
+            # ==========================================
+            # Update UI
+            # ==========================================
+
+            self.organize_button.configure(
+                state="disabled"
+            )
+
             self.status_label.configure(
                 text=(
                     f"Organization complete • "
@@ -824,12 +953,20 @@ class MainWindow(ctk.CTk):
                 )
             )
 
-            # Show result
+            # ==========================================
+            # Show Result
+            # ==========================================
+
             if error_count == 0:
 
                 messagebox.showinfo(
                     "Organization Complete",
-                    f"Successfully organized {moved_count} files."
+                    (
+                        f"Successfully organized "
+                        f"{moved_count} files.\n\n"
+                        "You can use Undo to restore "
+                        "the files."
+                    )
                 )
 
             else:
@@ -838,14 +975,18 @@ class MainWindow(ctk.CTk):
                     "Organization Completed With Errors",
                     (
                         f"{moved_count} files organized.\n"
-                        f"{error_count} files could not be moved."
+                        f"{error_count} files could not "
+                        "be moved.\n\n"
+                        "Undo can restore the files "
+                        "that were successfully moved."
                     )
                 )
 
-            # Disable organize until another scan
-            self.organize_button.configure(
-                state="disabled"
-            )
+            # ==========================================
+            # Rescan Folder
+            # ==========================================
+
+            self.refresh_after_organization()
 
         except Exception as error:
 
@@ -858,6 +999,258 @@ class MainWindow(ctk.CTk):
                 str(error)
             )
 
+    # ==========================================
+    # Undo Organization
+    # ==========================================
+
+    def undo_organization(self):
+
+        if not self.last_organization:
+
+            messagebox.showinfo(
+                "Nothing to Undo",
+                "There is no organization action to undo."
+            )
+
+            return
+
+        moved_files = self.last_organization.get(
+            "moved",
+            []
+        )
+
+        if not moved_files:
+
+            messagebox.showinfo(
+                "Nothing to Undo",
+                "There are no moved files to restore."
+            )
+
+            return
+
+        confirm = messagebox.askyesno(
+            "Undo Organization",
+            (
+                f"Restore {len(moved_files)} files "
+                "to their original locations?"
+            )
+        )
+
+        if not confirm:
+            return
+
+        try:
+
+            self.status_label.configure(
+                text="Undoing organization..."
+            )
+
+            self.update_idletasks()
+
+            restored_count = 0
+            errors = []
+
+            # ==========================================
+            # Restore Each File
+            # ==========================================
+
+            for file_data in moved_files:
+
+                source = file_data.get(
+                    "source"
+                )
+
+                destination = file_data.get(
+                    "destination"
+                )
+
+                if not source or not destination:
+                    errors.append(
+                        "Missing source or destination path."
+                    )
+                    continue
+
+                # File no longer exists at destination
+                if not os.path.isfile(destination):
+
+                    errors.append(
+                        f"File not found: {destination}"
+                    )
+
+                    continue
+
+                try:
+
+                    # ==========================================
+                    # Make Sure Original Directory Exists
+                    # ==========================================
+
+                    original_directory = os.path.dirname(
+                        source
+                    )
+
+                    os.makedirs(
+                        original_directory,
+                        exist_ok=True
+                    )
+
+                    # ==========================================
+                    # Avoid Overwriting Another File
+                    # ==========================================
+
+                    if os.path.exists(source):
+
+                        errors.append(
+                            (
+                                f"Original location already "
+                                f"contains a file: {source}"
+                            )
+                        )
+
+                        continue
+
+                    # ==========================================
+                    # Move Back
+                    # ==========================================
+
+                    shutil.move(
+                        destination,
+                        source
+                    )
+
+                    restored_count += 1
+
+                except Exception as error:
+
+                    errors.append(
+                        f"{os.path.basename(destination)}: {error}"
+                    )
+
+            # ==========================================
+            # Clear Undo History
+            # ==========================================
+
+            self.last_organization = None
+
+            self.undo_button.configure(
+                state="disabled"
+            )
+
+            # ==========================================
+            # Rescan
+            # ==========================================
+
+            self.refresh_after_organization()
+
+            # ==========================================
+            # Result
+            # ==========================================
+
+            if not errors:
+
+                self.status_label.configure(
+                    text=(
+                        f"Undo complete • "
+                        f"{restored_count} files restored"
+                    )
+                )
+
+                messagebox.showinfo(
+                    "Undo Complete",
+                    (
+                        f"Successfully restored "
+                        f"{restored_count} files."
+                    )
+                )
+
+            else:
+
+                self.status_label.configure(
+                    text=(
+                        f"Undo completed • "
+                        f"{restored_count} restored, "
+                        f"{len(errors)} errors"
+                    )
+                )
+
+                messagebox.showwarning(
+                    "Undo Completed With Errors",
+                    (
+                        f"{restored_count} files restored.\n"
+                        f"{len(errors)} files could not "
+                        "be restored."
+                    )
+                )
+
+        except Exception as error:
+
+            self.status_label.configure(
+                text="Undo failed"
+            )
+
+            messagebox.showerror(
+                "Undo Error",
+                str(error)
+            )
+
+    # ==========================================
+    # Refresh After Organization
+    # ==========================================
+
+    def refresh_after_organization(self):
+
+        try:
+
+            results = scan(
+                self.selected_folder
+            )
+
+            self.scanned_files = results[
+                "files"
+            ]
+
+            # ==========================================
+            # Update Dashboard
+            # ==========================================
+
+            self.card_values["Total Files"].configure(
+                text=str(
+                    results["total_files"]
+                )
+            )
+
+            self.card_values["Categories"].configure(
+                text=str(
+                    results["categories"]
+                )
+            )
+
+            total_size_mb = (
+                results["total_size"]
+                / (1024 * 1024)
+            )
+
+            self.card_values["Total Size"].configure(
+                text=f"{total_size_mb:.2f} MB"
+            )
+
+            # ==========================================
+            # Display Updated Files
+            # ==========================================
+
+            self.display_files(
+                self.scanned_files
+            )
+
+        except Exception as error:
+
+            self.status_label.configure(
+                text="Refresh failed"
+            )
+
+            print(
+                f"Refresh error: {error}"
+            )
 
     # ==========================================
     # Display Files
@@ -865,27 +1258,24 @@ class MainWindow(ctk.CTk):
 
     def display_files(self, files):
 
-        # Remove old rows
-        for widget in self.file_list.winfo_children():
-            widget.destroy()
+        self.clear_file_list()
 
-        # No files
+        # ==========================================
+        # No Files
+        # ==========================================
+
         if not files:
 
-            self.empty_label = ctk.CTkLabel(
-                self.file_list,
-                text="No files found",
-                text_color="gray",
-                font=("Segoe UI", 14)
-            )
-
-            self.empty_label.pack(
-                pady=40
+            self.show_empty_message(
+                "No files found"
             )
 
             return
 
-        # Create rows
+        # ==========================================
+        # Create Rows
+        # ==========================================
+
         for file_data in files:
 
             row = ctk.CTkFrame(
@@ -898,35 +1288,39 @@ class MainWindow(ctk.CTk):
                 pady=2
             )
 
-            # ------------------------------------------
+            # ==========================================
             # File Name
-            # ------------------------------------------
+            # ==========================================
 
-            name_label = ctk.CTkLabel(
+            ctk.CTkLabel(
                 row,
                 text=file_data["name"],
                 anchor="w"
-            )
-
-            name_label.pack(
+            ).pack(
                 side="left",
                 fill="x",
                 expand=True,
                 padx=(15, 5)
             )
 
-            # ------------------------------------------
+            # ==========================================
             # Extension
-            # ------------------------------------------
+            # ==========================================
 
-            extension = file_data["extension"]
+            extension = file_data.get(
+                "extension",
+                ""
+            )
 
             if extension:
+
                 extension = extension.upper().replace(
                     ".",
                     ""
                 )
+
             else:
+
                 extension = "FILE"
 
             ctk.CTkLabel(
@@ -938,12 +1332,15 @@ class MainWindow(ctk.CTk):
                 padx=5
             )
 
-            # ------------------------------------------
+            # ==========================================
             # File Size
-            # ------------------------------------------
+            # ==========================================
 
             size = self.format_file_size(
-                file_data["size"]
+                file_data.get(
+                    "size",
+                    0
+                )
             )
 
             ctk.CTkLabel(
@@ -962,12 +1359,15 @@ class MainWindow(ctk.CTk):
     def format_file_size(self, size):
 
         if size < 1024:
+
             return f"{size} B"
 
         if size < 1024 * 1024:
+
             return f"{size / 1024:.1f} KB"
 
         if size < 1024 * 1024 * 1024:
+
             return f"{size / (1024 * 1024):.1f} MB"
 
         return f"{size / (1024 * 1024 * 1024):.2f} GB"
@@ -1001,11 +1401,12 @@ class MainWindow(ctk.CTk):
 
     def display_size_summary(self):
 
-        # Clear existing table
-        for widget in self.file_list.winfo_children():
-            widget.destroy()
+        self.clear_file_list()
 
-        # Calculate category sizes
+        # ==========================================
+        # Calculate Category Sizes
+        # ==========================================
+
         category_sizes = {}
 
         for file_data in self.scanned_files:
@@ -1025,7 +1426,22 @@ class MainWindow(ctk.CTk):
                 + size
             )
 
+        # ==========================================
+        # No Data
+        # ==========================================
+
+        if not category_sizes:
+
+            self.show_empty_message(
+                "No size information available"
+            )
+
+            return
+
+        # ==========================================
         # Header
+        # ==========================================
+
         header = ctk.CTkFrame(
             self.file_list,
             height=45
@@ -1058,7 +1474,10 @@ class MainWindow(ctk.CTk):
             padx=15
         )
 
+        # ==========================================
         # Rows
+        # ==========================================
+
         for category, size in sorted(
             category_sizes.items()
         ):
@@ -1087,7 +1506,9 @@ class MainWindow(ctk.CTk):
 
             ctk.CTkLabel(
                 row,
-                text=self.format_file_size(size),
+                text=self.format_file_size(
+                    size
+                ),
                 width=150,
                 font=("Segoe UI", 14, "bold")
             ).pack(
