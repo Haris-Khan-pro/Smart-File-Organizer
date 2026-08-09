@@ -1,9 +1,10 @@
-import os
-import hashlib
+import threading
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
+from app.core.config import APP_NAME, WINDOW_GEOMETRY, WINDOW_MIN_SIZE
+from app.core.logger import logger
 from app.core.scanner import scan
 from app.core.organizer import organize, undo_organization
 
@@ -25,9 +26,10 @@ class MainWindow(ctk.CTk):
 
         super().__init__()
 
-        self.title("Smart File Organizer Pro")
-        self.geometry("1200x720")
-        self.minsize(900, 600)
+        self.title(APP_NAME)
+        self.geometry(WINDOW_GEOMETRY)
+        self.minsize(*WINDOW_MIN_SIZE)
+        logger.info("Application startup complete")
 
         # ==========================================
         # Application State
@@ -46,6 +48,11 @@ class MainWindow(ctk.CTk):
 
         # Last successful organization result
         self.last_organization = None
+
+        # Track the latest in-flight operation so stale worker results
+        # cannot overwrite a newer scan/organize/undo state.
+        self._operation_counter = 0
+        self._latest_operation_id = 0
 
         # ==========================================
         # Center Window
@@ -421,144 +428,35 @@ class MainWindow(ctk.CTk):
     # Duplicate Detection
     # ==========================================
 
-    def detect_duplicates(self, show_results=False):
+    def detect_duplicates(
+        self,
+        show_results=False,
+        duplicate_groups=None,
+    ):
 
         self.duplicate_groups = []
         self.duplicate_count = 0
 
-        if not self.scanned_files:
-
-            self.card_values["Duplicates"].configure(
-                text="0"
-            )
-
-            if show_results:
-
-                self.show_empty_message(
-                    "No files available for duplicate detection"
-                )
-
-            return
-
         try:
 
-            # ==========================================
-            # Step 1 — Group Files By Size
-            # ==========================================
-
-            size_groups = {}
-
-            for file_data in self.scanned_files:
-
-                file_path = file_data.get("path")
-
-                if not file_path:
-                    continue
-
-                try:
-
-                    if not os.path.isfile(file_path):
-                        continue
-
-                    size = file_data.get(
-                        "size",
-                        0
-                    )
-
-                    size_groups.setdefault(
-                        size,
-                        []
-                    ).append(file_data)
-
-                except OSError:
-
-                    continue
-
-            # ==========================================
-            # Step 2 — Hash Files With Same Size
-            # ==========================================
-
-            duplicate_groups = []
-
-            for size, files in size_groups.items():
-
-                if len(files) < 2:
-                    continue
-
-                hash_groups = {}
-
-                for file_data in files:
-
-                    file_path = file_data.get("path")
-
-                    if not file_path:
-                        continue
-
-                    try:
-
-                        file_hash = self.calculate_file_hash(
-                            file_path
-                        )
-
-                        hash_groups.setdefault(
-                            file_hash,
-                            []
-                        ).append(file_data)
-
-                    except (
-                        OSError,
-                        PermissionError
-                    ):
-
-                        continue
-
-                # ==========================================
-                # Store Actual Duplicate Groups
-                # ==========================================
-
-                for file_hash, matching_files in hash_groups.items():
-
-                    if len(matching_files) > 1:
-
-                        duplicate_groups.append({
-                            "hash": file_hash,
-                            "size": size,
-                            "files": matching_files
-                        })
-
-            # ==========================================
-            # Calculate Duplicate Count
-            # ==========================================
-
-            duplicate_count = 0
-
-            for group in duplicate_groups:
-
-                duplicate_count += (
-                    len(group["files"]) - 1
-                )
-
-            # ==========================================
-            # Save Results
-            # ==========================================
+            if duplicate_groups is None:
+                duplicate_groups = []
 
             self.duplicate_groups = duplicate_groups
-            self.duplicate_count = duplicate_count
 
-            # ==========================================
-            # Update Dashboard Immediately
-            # ==========================================
-
-            self.card_values["Duplicates"].configure(
-                text=str(duplicate_count)
+            # Count duplicate files from the scanner's result set.
+            # The core scanner owns duplicate detection; the UI only
+            # reflects the already-computed result.
+            self.duplicate_count = sum(
+                len(group.get("files", [])) - 1
+                for group in duplicate_groups
             )
 
-            # ==========================================
-            # Optionally Display Results
-            # ==========================================
+            self.card_values["Duplicates"].configure(
+                text=str(self.duplicate_count)
+            )
 
             if show_results:
-
                 self.display_duplicates(
                     duplicate_groups
                 )
@@ -569,6 +467,9 @@ class MainWindow(ctk.CTk):
                 text="0"
             )
 
+            self.duplicate_groups = []
+            self.duplicate_count = 0
+
             self.status_label.configure(
                 text="Duplicate detection failed"
             )
@@ -577,32 +478,6 @@ class MainWindow(ctk.CTk):
                 "Duplicate Detection Error",
                 str(error)
             )
-
-    # ==========================================
-    # Calculate SHA-256 File Hash
-    # ==========================================
-
-    def calculate_file_hash(self, file_path):
-
-        sha256 = hashlib.sha256()
-
-        with open(
-            file_path,
-            "rb"
-        ) as file:
-
-            while True:
-
-                chunk = file.read(
-                    1024 * 1024
-                )
-
-                if not chunk:
-                    break
-
-                sha256.update(chunk)
-
-        return sha256.hexdigest()
 
     # ==========================================
     # Display Duplicate Groups
@@ -1079,10 +954,56 @@ class MainWindow(ctk.CTk):
         )
 
     # ==========================================
+    # Action Button State
+    # ==========================================
+
+    @staticmethod
+    def get_action_button_state(selected_folder, scanned_files, last_organization):
+        has_folder = bool(selected_folder)
+        has_files = bool(scanned_files)
+        has_undo = bool(last_organization and last_organization.get("moved"))
+
+        return {
+            "scan": has_folder,
+            "organize": has_folder and has_files,
+            "undo": has_undo,
+        }
+
+    def update_action_buttons(self):
+
+        state = self.get_action_button_state(
+            self.selected_folder,
+            self.scanned_files,
+            self.last_organization,
+        )
+
+        self.scan_button.configure(
+            state="normal" if state["scan"] else "disabled"
+        )
+
+        self.organize_button.configure(
+            state="normal" if state["organize"] else "disabled"
+        )
+
+        self.undo_button.configure(
+            state="normal" if state["undo"] else "disabled"
+        )
+
+    def _begin_operation(self):
+        self._operation_counter += 1
+        self._latest_operation_id = self._operation_counter
+        return self._latest_operation_id
+
+    def _is_current_operation(self, operation_id):
+        return operation_id == self._latest_operation_id
+
+    # ==========================================
     # Select Folder
     # ==========================================
 
     def select_folder(self):
+
+        self._begin_operation()
 
         folder = filedialog.askdirectory(
             title="Select Folder to Organize"
@@ -1092,6 +1013,7 @@ class MainWindow(ctk.CTk):
             return
 
         self.selected_folder = folder
+        logger.info("Folder selected: %s", folder)
 
         self.scanned_files = []
         self.duplicate_groups = []
@@ -1103,7 +1025,7 @@ class MainWindow(ctk.CTk):
         )
 
         self.status_label.configure(
-            text="Folder selected successfully"
+            text="Folder selected • ready to scan"
         )
 
         # ==========================================
@@ -1126,21 +1048,7 @@ class MainWindow(ctk.CTk):
             text="0"
         )
 
-        # ==========================================
-        # Reset Buttons
-        # ==========================================
-
-        self.scan_button.configure(
-            state="normal"
-        )
-
-        self.organize_button.configure(
-            state="disabled"
-        )
-
-        self.undo_button.configure(
-            state="disabled"
-        )
+        self.update_action_buttons()
 
         self.show_empty_message(
             "No files scanned yet"
@@ -1161,148 +1069,106 @@ class MainWindow(ctk.CTk):
 
             return
 
+        operation_id = self._begin_operation()
+
+        self.scan_button.configure(state="disabled")
+        self.organize_button.configure(state="disabled")
+        self.undo_button.configure(state="disabled")
+
+        self.status_label.configure(
+            text="Scanning folder..."
+        )
+
+        self.update_idletasks()
+
+        worker = threading.Thread(
+            target=self._scan_worker,
+            args=(operation_id,),
+            daemon=True,
+        )
+        worker.start()
+
+    def _scan_worker(self, operation_id):
+
         try:
+            logger.info("Scan started for folder: %s", self.selected_folder)
+            results = scan(self.selected_folder)
+            self.after(0, self._apply_scan_results, operation_id, results)
 
+        except (OSError, ValueError, TypeError) as error:
+            logger.exception("Unexpected scan error for folder: %s", self.selected_folder)
+            self.after(0, self._handle_scan_error, operation_id, error)
+
+    def _apply_scan_results(self, operation_id, results):
+
+        if not self._is_current_operation(operation_id):
+            logger.info("Ignoring stale scan results for operation %s", operation_id)
+            return
+
+        self.scanned_files = results["files"]
+        self.last_organization = None
+        self.duplicate_groups = []
+        self.duplicate_count = 0
+
+        self.card_values["Duplicates"].configure(
+            text="0"
+        )
+
+        self.card_values["Total Files"].configure(
+            text=str(results["total_files"])
+        )
+
+        self.card_values["Categories"].configure(
+            text=str(results["categories"])
+        )
+
+        total_size_mb = results["total_size"] / (1024 * 1024)
+        self.card_values["Total Size"].configure(
+            text=f"{total_size_mb:.2f} MB"
+        )
+
+        self.detect_duplicates(
+            show_results=False,
+            duplicate_groups=results["duplicates"],
+        )
+
+        logger.info(
+            "Scan complete for %s: %s files, %s duplicates",
+            self.selected_folder,
+            results["total_files"],
+            self.duplicate_count,
+        )
+
+        self.display_files(self.scanned_files)
+        self.update_action_buttons()
+
+        if self.duplicate_count > 0:
             self.status_label.configure(
-                text="Scanning folder..."
-            )
-
-            self.update_idletasks()
-
-            # ==========================================
-            # Scan
-            # ==========================================
-
-            results = scan(
-                self.selected_folder
-            )
-
-            # ==========================================
-            # Store Results
-            # ==========================================
-
-            self.scanned_files = results["files"]
-
-            # A new scan invalidates old undo history.
-            self.last_organization = None
-
-            # ==========================================
-            # Reset Duplicate Data
-            # ==========================================
-
-            self.duplicate_groups = []
-            self.duplicate_count = 0
-
-            self.card_values["Duplicates"].configure(
-                text="0"
-            )
-
-            # ==========================================
-            # Enable / Disable Organize
-            # ==========================================
-
-            if self.scanned_files:
-
-                self.organize_button.configure(
-                    state="normal"
-                )
-
-            else:
-
-                self.organize_button.configure(
-                    state="disabled"
-                )
-
-            self.undo_button.configure(
-                state="disabled"
-            )
-
-            # ==========================================
-            # Update Dashboard
-            # ==========================================
-
-            self.card_values["Total Files"].configure(
-                text=str(
-                    results["total_files"]
+                text=(
+                    f"Scan complete • "
+                    f"{results['total_files']} files found • "
+                    f"{self.duplicate_count} duplicates • "
+                    f"Showing all files"
                 )
             )
-
-            self.card_values["Categories"].configure(
-                text=str(
-                    results["categories"]
-                )
-            )
-
-            total_size_mb = (
-                results["total_size"]
-                / (1024 * 1024)
-            )
-
-            self.card_values["Total Size"].configure(
-                text=f"{total_size_mb:.2f} MB"
-            )
-
-            # ==========================================
-            # AUTOMATIC DUPLICATE DETECTION
-            # ==========================================
-
+        else:
             self.status_label.configure(
-                text="Checking for duplicate files..."
-            )
-
-            self.update_idletasks()
-
-            # Detect duplicates automatically,
-            # but DO NOT display duplicate results.
-            self.detect_duplicates(
-                show_results=False
-            )
-
-            # ==========================================
-            # IMPORTANT:
-            # Show Total Files After Scan
-            # ==========================================
-
-            self.display_files(
-                self.scanned_files
-            )
-
-            # ==========================================
-            # Final Status
-            # ==========================================
-
-            if self.duplicate_count > 0:
-
-                self.status_label.configure(
-                    text=(
-                        f"Scan complete • "
-                        f"{results['total_files']} files found • "
-                        f"{self.duplicate_count} duplicates • "
-                        f"Showing all files"
-                    )
+                text=(
+                    f"Scan complete • "
+                    f"{results['total_files']} files found • "
+                    f"No duplicates • "
+                    f"Showing all files"
                 )
-
-            else:
-
-                self.status_label.configure(
-                    text=(
-                        f"Scan complete • "
-                        f"{results['total_files']} files found • "
-                        f"No duplicates • "
-                        f"Showing all files"
-                    )
-                )
-
-        except Exception as error:
-
-            self.status_label.configure(
-                text="Scan failed"
             )
 
-            messagebox.showerror(
-                "Scan Error",
-                str(error)
-            )
+    def _handle_scan_error(self, operation_id, error):
+        if not self._is_current_operation(operation_id):
+            logger.info("Ignoring stale scan error for operation %s", operation_id)
+            return
+
+        self.status_label.configure(text="Scan failed")
+        self.update_action_buttons()
+        messagebox.showerror("Scan Error", str(error))
 
     # ==========================================
     # Organize Files
@@ -1341,132 +1207,102 @@ class MainWindow(ctk.CTk):
         if not confirm:
             return
 
+        operation_id = self._begin_operation()
+
+        self.scan_button.configure(state="disabled")
+        self.organize_button.configure(state="disabled")
+        self.undo_button.configure(state="disabled")
+
+        self.status_label.configure(
+            text="Organizing files..."
+        )
+        self.update_idletasks()
+
+        worker = threading.Thread(
+            target=self._organize_worker,
+            args=(operation_id,),
+            daemon=True,
+        )
+        worker.start()
+
+    def _organize_worker(self, operation_id):
+
         try:
+            logger.info("Organization started for folder: %s with %s files", self.selected_folder, len(self.scanned_files))
+            results = organize(self.selected_folder, self.scanned_files)
+            self.after(0, self._apply_organization_results, operation_id, results)
 
+        except (OSError, ValueError, TypeError) as error:
+            logger.exception("Unexpected organization error for folder: %s", self.selected_folder)
+            self.after(0, self._handle_organization_error, operation_id, error)
+
+    def _apply_organization_results(self, operation_id, results):
+
+        if not self._is_current_operation(operation_id):
+            logger.info("Ignoring stale organization results for operation %s", operation_id)
+            return
+
+        moved_files = results.get("moved", [])
+        errors = results.get("errors", [])
+        moved_count = len(moved_files)
+        error_count = len(errors)
+
+        if moved_files:
+            self.last_organization = {
+                "moved": moved_files,
+                "errors": errors,
+            }
+        else:
+            self.last_organization = None
+
+        self.refresh_after_organization()
+        self.update_action_buttons()
+
+        if error_count == 0:
+            logger.info("Organization complete: %s files moved", moved_count)
             self.status_label.configure(
-                text="Organizing files..."
-            )
-
-            self.update_idletasks()
-
-            # ==========================================
-            # Organize
-            # ==========================================
-
-            results = organize(
-                self.selected_folder,
-                self.scanned_files
-            )
-
-            moved_files = results.get(
-                "moved",
-                []
-            )
-
-            errors = results.get(
-                "errors",
-                []
-            )
-
-            moved_count = len(
-                moved_files
-            )
-
-            error_count = len(
-                errors
-            )
-
-            # ==========================================
-            # Save Undo History
-            # ==========================================
-
-            if moved_files:
-
-                self.last_organization = {
-                    "moved": moved_files,
-                    "errors": errors
-                }
-
-                self.undo_button.configure(
-                    state="normal"
+                text=(
+                    f"Organization complete • "
+                    f"{moved_count} files moved"
                 )
-
-            else:
-
-                self.last_organization = None
-
-                self.undo_button.configure(
-                    state="disabled"
-                )
-
-            # ==========================================
-            # Disable Organize
-            # ==========================================
-
-            self.organize_button.configure(
-                state="disabled"
             )
-
-            # ==========================================
-            # Refresh
-            # ==========================================
-
-            self.refresh_after_organization()
-
-            # ==========================================
-            # Result Feedback
-            # ==========================================
-
-            if error_count == 0:
-
-                self.status_label.configure(
-                    text=(
-                        f"Organization complete • "
-                        f"{moved_count} files moved"
-                    )
+            messagebox.showinfo(
+                "Organization Complete",
+                (
+                    f"Successfully organized "
+                    f"{moved_count} files.\n\n"
+                    "You can use Undo to restore "
+                    "the files."
                 )
-
-                messagebox.showinfo(
-                    "Organization Complete",
-                    (
-                        f"Successfully organized "
-                        f"{moved_count} files.\n\n"
-                        "You can use Undo to restore "
-                        "the files."
-                    )
-                )
-
-            else:
-
-                self.status_label.configure(
-                    text=(
-                        f"Organization completed with errors • "
-                        f"{moved_count} moved, "
-                        f"{error_count} errors"
-                    )
-                )
-
-                messagebox.showwarning(
-                    "Organization Completed With Errors",
-                    (
-                        f"{moved_count} files organized.\n"
-                        f"{error_count} files could not "
-                        "be moved.\n\n"
-                        "Undo can restore the files "
-                        "that were successfully moved."
-                    )
-                )
-
-        except Exception as error:
-
+            )
+        else:
+            logger.warning("Organization finished with errors: %s moved, %s failed", moved_count, error_count)
             self.status_label.configure(
-                text="Organization failed"
+                text=(
+                    f"Organization finished with errors • "
+                    f"{moved_count} moved, "
+                    f"{error_count} failed"
+                )
+            )
+            messagebox.showwarning(
+                "Organization Completed With Errors",
+                (
+                    f"{moved_count} files organized.\n"
+                    f"{error_count} files could not "
+                    "be moved.\n\n"
+                    "Undo can restore the files "
+                    "that were successfully moved."
+                )
             )
 
-            messagebox.showerror(
-                "Organization Error",
-                str(error)
-            )
+    def _handle_organization_error(self, operation_id, error):
+        if not self._is_current_operation(operation_id):
+            logger.info("Ignoring stale organization error for operation %s", operation_id)
+            return
+
+        self.status_label.configure(text="Organization failed")
+        self.update_action_buttons()
+        messagebox.showerror("Organization Error", str(error))
 
     # ==========================================
     # Undo Organization
@@ -1508,146 +1344,105 @@ class MainWindow(ctk.CTk):
         if not confirm:
             return
 
+        operation_id = self._begin_operation()
+
+        self.scan_button.configure(state="disabled")
+        self.organize_button.configure(state="disabled")
+        self.undo_button.configure(state="disabled")
+
+        self.status_label.configure(
+            text="Restoring files..."
+        )
+        self.update_idletasks()
+
+        worker = threading.Thread(
+            target=self._undo_worker,
+            args=(operation_id, moved_files),
+            daemon=True,
+        )
+        worker.start()
+
+    def _undo_worker(self, operation_id, moved_files):
+
         try:
+            logger.info("Undo started for %s files", len(moved_files))
+            result = undo_organization(moved_files)
+            self.after(0, self._apply_undo_results, operation_id, moved_files, result)
 
+        except (OSError, ValueError, TypeError) as error:
+            logger.exception("Unexpected undo error")
+            self.after(0, self._handle_undo_error, operation_id, error)
+
+    def _apply_undo_results(self, operation_id, moved_files, result):
+
+        if not self._is_current_operation(operation_id):
+            logger.info("Ignoring stale undo results for operation %s", operation_id)
+            return
+
+        restored = result.get("restored", [])
+        errors = result.get("errors", [])
+        restored_count = len(restored)
+        error_count = len(errors)
+
+        if error_count == 0:
+            self.last_organization = None
+        else:
+            restored_sources = {item["source"] for item in restored}
+            remaining = [
+                item for item in moved_files
+                if item.get("source") not in restored_sources
+            ]
+            self.last_organization = {"moved": remaining} if remaining else None
+
+        self.update_action_buttons()
+        self.refresh_after_organization()
+
+        if error_count == 0:
+            logger.info("Undo complete: %s files restored", restored_count)
             self.status_label.configure(
-                text="Undoing organization..."
-            )
-
-            self.update_idletasks()
-
-            # ==========================================
-            # Undo
-            # ==========================================
-
-            result = undo_organization(
-                moved_files
-            )
-
-            restored = result.get(
-                "restored",
-                []
-            )
-
-            errors = result.get(
-                "errors",
-                []
-            )
-
-            restored_count = len(
-                restored
-            )
-
-            error_count = len(
-                errors
-            )
-
-            # ==========================================
-            # Update Undo History
-            # ==========================================
-
-            if error_count == 0:
-
-                self.last_organization = None
-
-                self.undo_button.configure(
-                    state="disabled"
+                text=(
+                    f"Undo complete • "
+                    f"{restored_count} files restored"
                 )
-
-            else:
-
-                restored_sources = {
-                    item["source"]
-                    for item in restored
-                }
-
-                remaining = [
-                    item
-                    for item in moved_files
-                    if item.get("source")
-                    not in restored_sources
-                ]
-
-                if remaining:
-
-                    self.last_organization = {
-                        "moved": remaining
-                    }
-
-                    self.undo_button.configure(
-                        state="normal"
-                    )
-
-                else:
-
-                    self.last_organization = None
-
-                    self.undo_button.configure(
-                        state="disabled"
-                    )
-
-            # ==========================================
-            # Refresh
-            # ==========================================
-
-            self.refresh_after_organization()
-
-            # ==========================================
-            # Result Feedback
-            # ==========================================
-
-            if error_count == 0:
-
-                self.status_label.configure(
-                    text=(
-                        f"Undo complete • "
-                        f"{restored_count} files restored"
-                    )
+            )
+            messagebox.showinfo(
+                "Undo Complete",
+                (
+                    f"Successfully restored "
+                    f"{restored_count} files."
                 )
-
-                messagebox.showinfo(
-                    "Undo Complete",
-                    (
-                        f"Successfully restored "
-                        f"{restored_count} files."
-                    )
-                )
-
-            else:
-
-                self.status_label.configure(
-                    text=(
-                        f"Undo completed with errors • "
-                        f"{restored_count} restored, "
-                        f"{error_count} errors"
-                    )
-                )
-
-                error_details = "\n".join(
-                    f"• {error['name']}: {error['error']}"
-                    for error in errors
-                )
-
-                messagebox.showwarning(
-                    "Undo Completed With Errors",
-                    (
-                        f"{restored_count} files restored.\n"
-                        f"{error_count} files could not "
-                        f"be restored.\n\n"
-                        f"{error_details}"
-                    )
-                )
-
-        except Exception as error:
-
+            )
+        else:
+            logger.warning("Undo finished with errors: %s restored, %s failed", restored_count, error_count)
             self.status_label.configure(
-                text="Undo failed"
+                text=(
+                    f"Undo finished with errors • "
+                    f"{restored_count} restored, "
+                    f"{error_count} failed"
+                )
+            )
+            error_details = "\n".join(
+                f"• {error['name']}: {error['error']}"
+                for error in errors
+            )
+            messagebox.showwarning(
+                "Undo Completed With Errors",
+                (
+                    f"{restored_count} files restored.\n"
+                    f"{error_count} files could not "
+                    f"be restored.\n\n"
+                    f"{error_details}"
+                )
             )
 
-            messagebox.showerror(
-                "Undo Error",
-                str(error)
-            )
+    def _handle_undo_error(self, operation_id, error):
+        if not self._is_current_operation(operation_id):
+            logger.info("Ignoring stale undo error for operation %s", operation_id)
+            return
+
+        self.status_label.configure(text="Undo failed")
+        self.update_action_buttons()
+        messagebox.showerror("Undo Error", str(error))
 
     # ==========================================
     # Refresh After Organization
@@ -1691,11 +1486,12 @@ class MainWindow(ctk.CTk):
             )
 
             # ==========================================
-            # Detect Duplicates Again
+            # Reuse Duplicates From scan()
             # ==========================================
 
             self.detect_duplicates(
-                show_results=False
+                show_results=False,
+                duplicate_groups=results["duplicates"],
             )
 
             # ==========================================
@@ -1722,14 +1518,31 @@ class MainWindow(ctk.CTk):
                     state="disabled"
                 )
 
+            if not self.scanned_files:
+                self.status_label.configure(
+                    text="Folder refreshed • no files remain"
+                )
+            elif self.duplicate_count > 0:
+                self.status_label.configure(
+                    text=(
+                        f"Folder refreshed • "
+                        f"{len(self.scanned_files)} files • "
+                        f"{self.duplicate_count} duplicate files"
+                    )
+                )
+            else:
+                self.status_label.configure(
+                    text=(
+                        f"Folder refreshed • "
+                        f"{len(self.scanned_files)} files • "
+                        f"no duplicates"
+                    )
+                )
+
         except Exception as error:
 
             self.status_label.configure(
                 text="Refresh failed"
-            )
-
-            print(
-                f"Refresh error: {error}"
             )
 
     # ==========================================

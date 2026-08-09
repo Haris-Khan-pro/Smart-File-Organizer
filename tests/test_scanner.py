@@ -96,6 +96,35 @@ class TestScanner(unittest.TestCase):
             self.assertEqual(results["duplicate_groups"], 0)
             self.assertEqual(results["duplicate_files"], 0)
 
+    def test_scan_invalid_folder_returns_empty_results(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing_path = os.path.join(temp_dir, "missing_folder")
+
+            results = scan(missing_path)
+
+            self.assertEqual(results["total_files"], 0)
+            self.assertEqual(results["categories"], 0)
+            self.assertEqual(results["total_size"], 0)
+            self.assertEqual(results["duplicate_groups"], 0)
+            self.assertEqual(results["duplicate_files"], 0)
+
+    def test_scan_empty_file_and_unicode_space_names(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            empty_path = os.path.join(temp_dir, "empty.txt")
+            unicode_path = os.path.join(temp_dir, "Résumé report 2024.TXT")
+
+            with open(empty_path, "wb") as file:
+                file.write(b"")
+
+            with open(unicode_path, "wb") as file:
+                file.write(b"hello unicode")
+
+            results = scan(temp_dir)
+
+            self.assertEqual(results["total_files"], 2)
+            self.assertEqual(results["category_counts"]["Documents"], 2)
+            self.assertEqual(results["files"][0]["size"], 0)
+
     def test_unknown_extension_is_other(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = os.path.join(temp_dir, "unknown.xyz")
@@ -230,6 +259,12 @@ class TestScanner(unittest.TestCase):
             self.assertEqual(
                 duplicates[0]["size"],
                 len(b"same content"),
+            )
+            self.assertTrue(
+                all(
+                    file_data["size"] == len(b"same content")
+                    for file_data in duplicates[0]["files"]
+                )
             )
 
     def test_scan_duplicate_counts(self):

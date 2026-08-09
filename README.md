@@ -1,284 +1,174 @@
-\# 🗂️ Smart File Organizer Pro
+# Smart File Organizer
 
-A desktop file organization and analysis application built with Python and CustomTkinter.
+A lightweight desktop utility for scanning a folder, categorizing files, detecting duplicates, and moving files into category-based folders without losing the ability to undo the operation.
 
-Smart File Organizer Pro scans a selected folder, analyzes its files, categorizes them, calculates storage usage, detects duplicate files using SHA-256 hashing, organizes files into category folders, and provides an Undo system to restore organized files.
+## Purpose
 
----
+Smart File Organizer was built as a practical Python desktop app for everyday file cleanup. It helps users:
 
-## 📸 Screenshots
+- scan a selected folder recursively
+- review totals by category and file size
+- detect duplicate files by SHA-256 content hash
+- move files into organized category folders
+- restore files with an undo action if needed
 
-![Total Files](screenshots/totalfiles.png)
-![Categories](screenshots/categories.png)
-![Total Size](screenshots/totalsize.png)
-![Duplicates](screenshots/duplicates.png)
+## Features
 
----
+- recursive folder scanning
+- category detection for images, documents, video, audio, code, archives, executables, and other files
+- duplicate detection using SHA-256 hashing
+- dashboard summary for files, categories, total size, and duplicates
+- safe collision handling when destination filenames already exist
+- undo support for returning files to their original locations
+- clear status messages and logging for operational diagnostics
 
-## ✨ Features
+## Screenshots
 
-- 📁 **Folder Scanner** — Recursively scans any folder and collects full file metadata
-- 📊 **Dashboard Cards** — Live stats for Total Files, Categories, Total Size, and Duplicates
-- 🏷️ **File Categorization** — Automatically groups files into categories (Images, Documents, Videos, Audio, Code, Archives, and more)
-- 🔍 **Category View** — Click any dashboard card to filter and explore files by category
-- 💾 **Size Summary** — See storage usage broken down by category
-- 📂 **Organize** — Moves files into named category subfolders in one click
-- ↩️ **Undo Organization** — Restores every moved file back to its original location safely
-- 🔎 **Duplicate Detection** — Identifies duplicate files using SHA-256 content hashing
-- 🌙 **Dark Mode UI** — Clean professional dark interface built with CustomTkinter
-- 🛡️ **Error Safe** — All operations handle permission errors, missing files, and naming conflicts without crashing
+No screenshots are currently committed to this repository. Screenshot capture is not automated in the current environment, so this section intentionally avoids broken image references until a real desktop capture is added.
 
----
+## Architecture
 
-## 📁 Project Structure
+The project keeps the filesystem logic separate from the GUI:
 
-```
-Smart-File-Organizer/
+- app/main.py: application entry point
+- app/core/scanner.py: scan and duplicate detection logic
+- app/core/organizer.py: move and undo logic
+- app/ui/main_window.py: CustomTkinter interface and user actions
+- app/core/logger.py: application logging
+- app/core/config.py: shared metadata and constants
+- tests/: unit tests for scan and organization behavior
+
+## Project Structure
+
+```text
+SmartFileOrganizer/
 ├── app/
-│   ├── main.py                  # 🚀 Entry point — starts the application
+│   ├── __init__.py
+│   ├── main.py
 │   ├── core/
-│   │   ├── config.py            # ⚙️  Category definitions and get_category() logic
-│   │   ├── scanner.py           # 🔍 Scans folders and builds file metadata list
-│   │   ├── organizer.py         # 📂 Moves files into folders + undo logic
-│   │   └── logger.py            # 📝 Logging utility
+│   │   ├── __init__.py
+│   │   ├── config.py
+│   │   ├── logger.py
+│   │   ├── organizer.py
+│   │   └── scanner.py
 │   └── ui/
-│       ├── main_window.py       # 🖥️  Main window — connects UI to core functions
-│       ├── dashboard.py         # 📊 Dashboard card components
-│       ├── menu_bar.py          # 🔧 Menu bar
-│       └── status_bar.py        # 📌 Status bar
+│       ├── __init__.py
+│       ├── main_window.py
+│       ├── dashboard.py
+│       ├── menu_bar.py
+│       └── status_bar.py
 ├── config/
-│   └── settings.json            # 🔧 App configuration
-├── tests/                       # 🧪 Unit tests
+│   └── settings.json
+├── logs/
+├── pyproject.toml
+├── tests/
+│   ├── __init__.py
+│   ├── test_gui_state.py
+│   ├── test_organizer.py
+│   ├── test_packaging.py
+│   └── test_scanner.py
+├── README.md
 ├── requirements.txt
-└── README.md
+├── .gitignore
+└── .venv/
 ```
 
----
+## Technologies
 
-## 🏗️ Architecture — How the Files Work Together
+- Python 3.10+
+- CustomTkinter
+- standard library modules such as os, hashlib, shutil, logging, tempfile, unittest
 
-The app follows a strict **core / UI separation**. The UI never touches the filesystem directly. All file operations live in `core/`. The UI only calls core functions and displays their results.
+## Installation
 
-```
-┌─────────────────────────────────────────────────┐
-│                   app/main.py                   │
-│          Entry point — launches the app         │
-└────────────────────┬────────────────────────────┘
-                     │ creates
-                     ▼
-┌─────────────────────────────────────────────────┐
-│            app/ui/main_window.py                │
-│   Handles all buttons, dashboard, file table    │
-│   Calls core functions — never touches files    │
-└────┬──────────────┬──────────────┬──────────────┘
-     │ calls        │ calls        │ calls
-     ▼              ▼              ▼
-┌─────────┐  ┌───────────┐  ┌─────────────────┐
-│scanner  │  │organizer  │  │   config.py      │
-│.py      │  │.py        │  │                  │
-│         │  │           │  │ Defines all file │
-│scan()   │  │organize() │  │ categories and   │
-│         │  │           │  │ get_category()   │
-│Returns  │  │Moves files│  └─────────────────┘
-│file     │  │into named │
-│metadata │  │folders    │
-│list     │  │           │
-│         │  │undo_      │
-│         │  │organiz-   │
-│         │  │ation()    │
-│         │  │           │
-│         │  │Moves files│
-│         │  │back to    │
-│         │  │original   │
-│         │  │locations  │
-└─────────┘  └───────────┘
-```
+1. Clone the repository.
+2. Create a virtual environment.
+3. Activate the environment.
+4. Install requirements.
 
----
-
-## 🔄 Data Flow — Step by Step
-
-### 1️⃣ App Starts
-```
-main.py
-  └── creates MainWindow()
-        └── builds toolbar, dashboard, file table, status bar
-```
-
-### 2️⃣ User Selects a Folder
-```
-MainWindow.select_folder()
-  └── stores folder path
-  └── resets dashboard to zero
-  └── enables the Scan button
-```
-
-### 3️⃣ User Clicks Scan
-```
-MainWindow.scan_folder()
-  └── calls scanner.scan(folder_path)
-        └── os.walk() through every subfolder
-        └── for each file:
-              └── reads name, path, size, extension
-              └── calls config.get_category(extension)
-                    └── looks up extension in FILE_CATEGORIES dict
-                    └── returns category name ("Images", "Code", etc.)
-              └── builds file dict { name, path, extension, size, category }
-        └── returns { files, total_files, categories, total_size }
-  └── updates dashboard cards with totals
-  └── renders file list in the table
-  └── enables the Organize button
-```
-
-### 4️⃣ User Clicks Organize
-```
-MainWindow.organize_files()
-  └── calls organizer.organize(folder_path, scanned_files)
-        └── for each file:
-              └── creates category subfolder if it doesn't exist
-              └── handles duplicate filenames (appends _1, _2 ...)
-              └── moves file with shutil.move()
-              └── records { name, category, source, destination }
-        └── returns { moved: [...], errors: [...] }
-  └── saves move history to self.last_organization
-  └── enables the Undo button
-  └── rescans folder to refresh the dashboard
-```
-
-### 5️⃣ User Clicks Undo
-```
-MainWindow.undo_files()
-  └── calls organizer.undo_organization(moved_files)
-        └── for each moved file:
-              └── checks file still exists at destination
-              └── recreates original directory if needed
-              └── checks original location has no conflict
-              └── moves file back with shutil.move()
-              └── records restored or error
-        └── returns { restored: [...], errors: [...] }
-  └── clears self.last_organization
-  └── disables Undo button
-  └── rescans folder to refresh the dashboard
-```
-
----
-
-## ⚙️ How config.py Works
-
-`config.py` is the brain of the categorization system. It holds a dictionary mapping each category name to a set of file extensions:
-
-```python
-FILE_CATEGORIES = {
-    "Images":    { ".jpg", ".jpeg", ".png", ".gif", ... },
-    "Documents": { ".pdf", ".doc", ".docx", ".txt", ... },
-    "Videos":    { ".mp4", ".mkv", ".avi", ...},
-    "Audio":     { ".mp3", ".wav", ".flac", ... },
-    "Code":      { ".py", ".js", ".html", ".css", ... },
-    "Archives":  { ".zip", ".rar", ".7z", ... },
-    "Executables": { ".exe", ".msi", ".bat", ... }
-}
-```
-
-When `scanner.py` processes a file, it calls `get_category(extension)` which loops through this dictionary and returns the matching category. If no match is found, it returns `"Other"`.
-
-To add a new category or support a new file type, you only need to edit `config.py` — nothing else needs to change.
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Technology |
-|---|---|
-| 🐍 Language | Python 3.10+ |
-| 🖥️ GUI Framework | CustomTkinter |
-| 📦 File Operations | os, shutil (stdlib) |
-| 🔐 Duplicate Detection | hashlib SHA-256 |
-| 🏗️ Architecture | Modular — core logic separated from UI |
-
----
-
-## 🚀 Installation
-
-**1. Clone the repository**
-
-```bash
-git clone https://github.com/Haris-Khan-pro/Smart-File-Organizer.git
-cd Smart-File-Organizer
-```
-
-**2. Create a virtual environment**
+Example:
 
 ```bash
 python -m venv .venv
-```
-
-**3. Activate the virtual environment**
-
-```bash
 # Windows
 .venv\Scripts\activate
-
 # macOS / Linux
 source .venv/bin/activate
-```
-
-**4. Install dependencies**
-
-```bash
 pip install -r requirements.txt
 ```
 
-**5. Run the application**
+## Running the Application
 
 ```bash
 python -m app.main
 ```
 
----
+## Running Tests
 
-## 📖 Usage
+```bash
+python -m unittest discover -s tests -v
+```
 
-1. 📁 Click **Select Folder** to choose the folder you want to organize
-2. 🔍 Click **Scan** to analyze all files in the folder
-3. 📊 Review the dashboard — Total Files, Categories, Total Size, Duplicates
-4. 🏷️ Click any dashboard card to explore files by category
-5. 📂 Click **Organize** to move files into category subfolders
-6. ↩️ Click **Undo** at any time to restore all files to their original locations
+## Supported File Categories
 
----
+The app currently recognizes these categories:
 
-## 🗃️ Supported File Categories
+- Images: jpg, jpeg, png, gif, bmp, webp, svg, ico, tiff, tif
+- Documents: pdf, doc, docx, txt, rtf, odt, xls, xlsx, csv, ppt, pptx
+- Videos: mp4, mkv, avi, mov, wmv, flv, webm, m4v
+- Audio: mp3, wav, flac, aac, ogg, m4a, wma
+- Code: py, js, ts, jsx, tsx, html, css, java, cpp, c, h, hpp, cs, php, go, rs, rb, sql
+- Archives: zip, rar, 7z, tar, gz, bz2
+- Executables: exe, msi, bat, cmd, sh
+- Other: unrecognized extensions
 
-| Category | Extensions |
-|---|---|
-| 🖼️ Images | jpg, jpeg, png, gif, bmp, svg, webp, ico, tiff |
-| 📄 Documents | pdf, doc, docx, txt, xls, xlsx, ppt, pptx, csv |
-| 🎬 Videos | mp4, mkv, avi, mov, wmv, flv, webm, m4v |
-| 🎵 Audio | mp3, wav, flac, aac, ogg, m4a, wma |
-| 💻 Code | py, js, ts, html, css, java, c, cpp, go, rs, php, sql |
-| 📦 Archives | zip, rar, tar, gz, 7z, bz2 |
-| ⚙️ Executables | exe, msi, bat, cmd, sh |
-| 📁 Other | Everything else |
+## Duplicate Detection
 
----
+Duplicate files are identified by grouping files with the same file size and confirming identical SHA-256 hashes. This avoids false positives caused by same-size but different-content files.
 
-## 🤝 Contributing
+## Organization Behavior
 
-This project is open source and built for learning. Feel free to fork it, open issues, or submit pull requests.
+When the user organizes a folder:
 
----
+- files are moved into category subfolders inside the selected folder
+- duplicate destination names are resolved with a safe numbered suffix such as name_1.ext
+- files that disappear or cannot be moved are reported as errors without crashing the operation
+- successful moves remain available for undo
 
-## 👤 Author
+## Undo Behavior
 
-**Haris Khan**
-- 🐙 GitHub: [@Haris-Khan-pro](https://github.com/Haris-Khan-pro)
+Undo restores moved files back to their original location when possible. The app blocks restoration if the original location already exists to avoid overwriting user files. It reports conflicts clearly instead of silently discarding them.
 
----
+## Safety Limitations
 
-## 📜 License
+This project is intentionally conservative around file safety. It does not overwrite existing files and it does not silently continue after critical filesystem errors. Some limitations remain:
 
-This project is open source — see the [LICENSE](LICENSE) file for details.
+- operations depend on file system permissions
+- a folder can change while the app is running
+- the GUI is designed for desktop use, not for remote or headless automation
+- large scans and operations are executed on background worker threads, but they still depend on local filesystem responsiveness and the active desktop environment
 
----
+## Known Limitations
 
-*🐍 Built as part of a 50-day Python project sprint.*
+- the project is a desktop utility, not a full enterprise document manager
+- file categorization is rule-based and extension-based
+- layout and styling are intentionally straightforward rather than highly customized
+- the app is best suited for local folder cleanup on a personal machine
+
+## Future Improvements
+
+Possible follow-up improvements include:
+
+- better per-file progress indicators
+- user-configurable category rules
+- export/import of organization history
+- drag-and-drop folder support
+- packaged Windows installer creation with PyInstaller or a similar tool
+
+## License
+
+This project is provided as a personal portfolio project and does not currently declare a formal open-source license. If you plan to share or publish it publicly, add a license file and include the chosen terms.
+
+## Notes
+
+This project is intended to show good Python desktop engineering habits: validation, safe filesystem behavior, explicit error reporting, and unit-tested core logic. It is not a replacement for a full production file management platform.

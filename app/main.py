@@ -1,6 +1,10 @@
 from app.ui.main_window import MainWindow
 
 
-if __name__ == "__main__":
+def main():
     app = MainWindow()
     app.mainloop()
+
+
+if __name__ == "__main__":
+    main()

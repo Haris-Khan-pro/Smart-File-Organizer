@@ -1,6 +1,8 @@
 import os
 import hashlib
 
+from app.core.logger import logger
+
 # ==========================================
 # File Categories
 # ==========================================
@@ -101,11 +103,17 @@ FILE_CATEGORIES = {
 
 def get_category(extension):
 
-    extension = extension.lower()
+    if not extension:
+        return "Other"
+
+    normalized_extension = str(extension).lower()
+
+    if not normalized_extension.startswith("."):
+        normalized_extension = f".{normalized_extension}"
 
     for category, extensions in FILE_CATEGORIES.items():
 
-        if extension in extensions:
+        if normalized_extension in extensions:
             return category
 
     return "Other"
@@ -122,6 +130,9 @@ def calculate_file_hash(file_path, chunk_size=1024 * 1024):
     Files with the same SHA-256 hash have
     identical content.
     """
+
+    if not file_path or not os.path.isfile(file_path):
+        return None
 
     sha256 = hashlib.sha256()
 
@@ -141,8 +152,10 @@ def calculate_file_hash(file_path, chunk_size=1024 * 1024):
         return sha256.hexdigest()
 
     except (
+        FileNotFoundError,
         PermissionError,
-        OSError
+        OSError,
+        ValueError
     ):
 
         return None
@@ -245,7 +258,8 @@ def find_duplicates(files):
                 "files": [
                     {
                         "name": file_data["name"],
-                        "path": file_data["path"]
+                        "path": file_data["path"],
+                        "size": file_data.get("size", file_size)
                     }
                     for file_data in matching_files
                 ]
@@ -260,96 +274,79 @@ def find_duplicates(files):
 
 def scan(folder_path):
 
+    if not folder_path or not os.path.isdir(folder_path):
+        logger.warning("Scan requested for invalid folder: %s", folder_path)
+        return {
+            "files": [],
+            "total_files": 0,
+            "categories": 0,
+            "category_counts": {},
+            "total_size": 0,
+            "duplicates": [],
+            "duplicate_groups": 0,
+            "duplicate_files": 0,
+        }
+
     files = []
-
     category_counts = {}
-
     total_size = 0
 
-    # ==========================================
-    # Walk Through Folder
-    # ==========================================
+    logger.info("Scan started for folder: %s", folder_path)
 
-    for root, directories, filenames in os.walk(folder_path):
+    try:
+        for root, directories, filenames in os.walk(folder_path, followlinks=False):
+            directories[:] = [
+                directory for directory in directories
+                if not os.path.islink(os.path.join(root, directory))
+            ]
 
-        for filename in filenames:
+            for filename in filenames:
+                file_path = os.path.join(root, filename)
 
-            file_path = os.path.join(
-                root,
-                filename
-            )
+                if os.path.islink(file_path):
+                    continue
 
-            try:
+                try:
+                    if not os.path.isfile(file_path):
+                        continue
 
-                file_size = os.path.getsize(
-                    file_path
-                )
+                    file_size = os.path.getsize(file_path)
+                except (FileNotFoundError, PermissionError, OSError):
+                    logger.warning("Skipping unreadable file during scan: %s", file_path)
+                    continue
 
-                _, extension = os.path.splitext(
-                    filename
-                )
+                _, extension = os.path.splitext(filename)
+                category = get_category(extension)
 
-                category = get_category(
-                    extension
-                )
-
-                # ==========================================
-                # Store File Information
-                # ==========================================
-
-                files.append({
+                file_record = {
                     "name": filename,
                     "path": file_path,
                     "extension": extension,
                     "size": file_size,
-                    "category": category
-                })
+                    "category": category,
+                }
 
-                # ==========================================
-                # Update Category Count
-                # ==========================================
-
-                category_counts[category] = (
-                    category_counts.get(
-                        category,
-                        0
-                    ) + 1
-                )
-
-                # ==========================================
-                # Update Total Size
-                # ==========================================
-
+                files.append(file_record)
+                category_counts[category] = category_counts.get(category, 0) + 1
                 total_size += file_size
+    except OSError as error:
+        logger.error("Scan failed for folder %s: %s", folder_path, error)
+        files = []
+        category_counts = {}
+        total_size = 0
 
-            except (
-                PermissionError,
-                OSError
-            ):
-
-                # Skip files we cannot access
-                continue
-
-    # ==========================================
-    # Find Duplicates
-    # ==========================================
-
-    duplicate_groups = find_duplicates(
-        files
-    )
-
-    # ==========================================
-    # Count Duplicate Files
-    # ==========================================
-
+    duplicate_groups = find_duplicates(files)
     duplicate_file_count = sum(
         len(group["files"])
         for group in duplicate_groups
     )
 
-    # ==========================================
-    # Return Scan Results
-    # ==========================================
+    logger.info(
+        "Scan complete for %s: %s files, %s duplicate groups",
+        folder_path,
+        len(files),
+        len(duplicate_groups),
+    )
 
     return {
         "files": files,
@@ -357,11 +354,7 @@ def scan(folder_path):
         "categories": len(category_counts),
         "category_counts": category_counts,
         "total_size": total_size,
-
-        # Duplicate information
         "duplicates": duplicate_groups,
-        "duplicate_groups": len(
-            duplicate_groups
-        ),
-        "duplicate_files": duplicate_file_count
+        "duplicate_groups": len(duplicate_groups),
+        "duplicate_files": duplicate_file_count,
     }
