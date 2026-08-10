@@ -459,7 +459,15 @@ Extension matching is case-insensitive. `.JPG`, `.jpg`, and `.Jpg` all map to `I
 
 ## 📸 Screenshots
 
-> Screenshots will be added in a future documentation update. The GUI requires a desktop environment to capture; no automated screenshot pipeline is currently configured for this repository.
+| 📄 Total Files View | 📁 Categories View |
+|---|---|
+| ![Total Files](screenshots/totalfiles.png) | ![Categories](screenshots/categories.png) |
+| Dashboard showing total file count after a scan. Click the card to list all discovered files with their type and size. | Files grouped by category. Click any category row to filter the file table to that type only. |
+
+| 💾 Total Size View | ⚠️ Duplicates View |
+|---|---|
+| ![Total Size](screenshots/totalsize.png) | ![Duplicates](screenshots/duplicates.png) |
+| Storage usage broken down per category — useful for spotting which file types are consuming the most disk space. | Duplicate groups detected via SHA-256 content hashing. Each group labels the original and every duplicate copy. |
 
 ---
 
@@ -487,7 +495,17 @@ Extension matching is case-insensitive. `.JPG`, `.jpg`, and `.Jpg` all map to `I
 
 ## 👨‍💻 Author
 
-Built as a Python desktop engineering portfolio project demonstrating: layered architecture, background threading with race condition protection, two-phase duplicate detection, non-destructive filesystem operations, and a fully unit-tested core logic layer.
+**Haris Khan**
+
+A CS graduate building real-world Python and full-stack projects to demonstrate engineering depth through code rather than credentials.
+
+| | |
+|---|---|
+| 🐙 GitHub | [@Haris-Khan-pro](https://github.com/Haris-Khan-pro) |
+| 📁 This Project | [Smart-File-Organizer](https://github.com/Haris-Khan-pro/Smart-File-Organizer) |
+| 🏃 Sprint | Built during a 50-day Python project sprint — 2 production-quality project per day |
+
+> This project demonstrates Python desktop engineering fundamentals: layered architecture, background threading with race condition protection, two-phase duplicate detection, non-destructive filesystem operations, and a fully unit-tested core logic layer.
 
 ---
 
